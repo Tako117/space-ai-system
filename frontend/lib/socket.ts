@@ -1,12 +1,8 @@
 // frontend/lib/socket.ts
-export type WSClientHello =
-  | { type: "subscribe"; channel: "telemetry" }
-  | { type: "publish_state"; channel: "telemetry"; state: PublishedState };
-
 export type PublishedObject = {
   id: string;
   kind: "satellite" | "debris";
-  name?: string; // ✅ if backend includes it
+  name?: string; // optional display name from TLE
   position_m: { x: number; y: number; z: number };
   velocity_mps: { x: number; y: number; z: number };
 };
@@ -33,8 +29,10 @@ export type RiskDecision = {
 export type RiskReport = {
   satellite_id: string;
   debris_id: string;
+
   satellite_name?: string | null;
   debris_name?: string | null;
+
   collision_risk: number; // 0..1
   confidence: number; // 0..1
   min_distance_m: number;
@@ -50,29 +48,43 @@ export type TelemetryEnvelope =
   | { type: "error"; message: string }
   | { type: "ok"; message: string };
 
+export type WSClientHello =
+  | { type: "subscribe"; channel: "telemetry" }
+  | { type: "publish_state"; channel: "telemetry"; state: PublishedState };
+
 let sharedWS: WebSocket | null = null;
 let sharedWSUsers = 0;
 
-function backendHttpBase(): string {
-  // Prefer env var on Render; fallback to localhost for dev.
-  const env = process.env.NEXT_PUBLIC_BACKEND_URL;
-  if (env && env.trim().length > 0) return env.replace(/\/+$/, "");
-  return "http://localhost:8000";
+function backendBaseUrl(): string {
+  // On Render you set NEXT_PUBLIC_BACKEND_URL=https://space-ai-system.onrender.com
+  const fromEnv =
+    typeof window !== "undefined"
+      ? (process.env.NEXT_PUBLIC_BACKEND_URL as string | undefined)
+      : undefined;
+
+  return (fromEnv && fromEnv.trim()) || "http://localhost:8000";
 }
 
 function wsUrl(): string {
-  // Convert http(s) -> ws(s)
-  const http = backendHttpBase();
-  if (http.startsWith("https://")) return http.replace("https://", "wss://") + "/ws";
-  if (http.startsWith("http://")) return http.replace("http://", "ws://") + "/ws";
-  // last resort
+  const base = backendBaseUrl();
+
+  // If backend is https => wss. If http => ws.
+  // Replace protocol only.
+  if (base.startsWith("https://")) return base.replace("https://", "wss://") + "/ws";
+  if (base.startsWith("http://")) return base.replace("http://", "ws://") + "/ws";
+
+  // fallback
   return "ws://localhost:8000/ws";
 }
 
 export function connectSocket(onMessage: (data: TelemetryEnvelope) => void) {
   sharedWSUsers += 1;
 
-  if (sharedWS && (sharedWS.readyState === WebSocket.OPEN || sharedWS.readyState === WebSocket.CONNECTING)) {
+  if (
+    sharedWS &&
+    (sharedWS.readyState === WebSocket.OPEN || sharedWS.readyState === WebSocket.CONNECTING)
+  ) {
+    // attach listener for this consumer
     sharedWS.addEventListener("message", (event) => {
       try {
         onMessage(JSON.parse(event.data));
@@ -86,9 +98,7 @@ export function connectSocket(onMessage: (data: TelemetryEnvelope) => void) {
 
   ws.onopen = () => {
     const hello: WSClientHello = { type: "subscribe", channel: "telemetry" };
-    try {
-      ws.send(JSON.stringify(hello));
-    } catch {}
+    ws.send(JSON.stringify(hello));
   };
 
   ws.onmessage = (event) => {
@@ -100,11 +110,7 @@ export function connectSocket(onMessage: (data: TelemetryEnvelope) => void) {
   };
 
   ws.onerror = () => {
-    // silent; pages may remount / refresh
-  };
-
-  ws.onclose = () => {
-    // allow reconnect on next mount
+    // keep silent in dev; UI can show "waiting"
   };
 
   return ws;
@@ -123,7 +129,5 @@ export function disconnectSocket() {
 
 export function publishState(ws: WebSocket, state: PublishedState) {
   const msg: WSClientHello = { type: "publish_state", channel: "telemetry", state };
-  try {
-    ws.send(JSON.stringify(msg));
-  } catch {}
+  ws.send(JSON.stringify(msg));
 }

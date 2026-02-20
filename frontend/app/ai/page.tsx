@@ -2,9 +2,8 @@
 "use client";
 
 import Link from "next/link";
-import { motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
-import { connectSocket, disconnectSocket, RiskReport, TelemetryEnvelope, PublishedState } from "../../lib/socket";
+import { connectSocket, disconnectSocket, RiskReport, TelemetryEnvelope } from "../../lib/socket";
 
 function clamp01(x: number) {
   return Math.max(0, Math.min(1, x));
@@ -21,27 +20,22 @@ export default function AIEnginePage() {
   const [report, setReport] = useState<RiskReport | null>(null);
   const [status, setStatus] = useState<string>("Waiting for WebSocket telemetry…");
 
-  const [nameMap, setNameMap] = useState<Record<string, string>>({});
-
   useEffect(() => {
     const ws = connectSocket((msg: TelemetryEnvelope) => {
       if (msg.type === "telemetry_state") {
-        const state: PublishedState = msg.state;
+        const sats = msg.state.objects
+          .filter((o) => o.kind === "satellite")
+          .map((o) => o.id);
 
-        const sats = state.objects.filter((o) => o.kind === "satellite").map((o) => o.id);
-        const debs = state.objects.filter((o) => o.kind === "debris").map((o) => o.id);
+        const debs = msg.state.objects
+          .filter((o) => o.kind === "debris")
+          .map((o) => o.id);
 
         setSatIds(sats);
         setDebIds(debs);
 
-        const map: Record<string, string> = {};
-        for (const o of state.objects) {
-          if (o.name) map[o.id] = o.name;
-        }
-        setNameMap(map);
-
-        if (!selectedSat && sats[0]) setSelectedSat(sats[0]);
-        if (!selectedDeb && debs[0]) setSelectedDeb(debs[0]);
+        setSelectedSat((prev) => prev || sats[0] || "");
+        setSelectedDeb((prev) => prev || debs[0] || "");
 
         setStatus("Streaming state…");
       }
@@ -51,32 +45,19 @@ export default function AIEnginePage() {
         setStatus("Live report updated");
       }
 
-      if (msg.type === "error") {
-        setStatus(msg.message);
-      }
+      if (msg.type === "error") setStatus(msg.message);
     });
 
     return () => {
-      // NOTE: don't double-close shared socket; disconnectSocket handles it
+      try {
+        ws.close();
+      } catch {}
       disconnectSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visible = useMemo(() => {
-    if (!report) return null;
-    return report;
-  }, [report]);
-
-  const satLabel = useMemo(() => {
-    if (!visible) return "—";
-    return visible.satellite_name || nameMap[visible.satellite_id] || visible.satellite_id;
-  }, [visible, nameMap]);
-
-  const debLabel = useMemo(() => {
-    if (!visible) return "—";
-    return visible.debris_name || nameMap[visible.debris_id] || visible.debris_id;
-  }, [visible, nameMap]);
+  const visible = useMemo(() => report, [report]);
 
   return (
     <main className="min-h-screen">
@@ -98,32 +79,18 @@ export default function AIEnginePage() {
       </header>
 
       <section className="mx-auto max-w-6xl px-6 pt-10 pb-12">
-        <motion.h1
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
-          className="text-3xl md:text-5xl font-semibold tracking-tight"
-        >
+        <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">
           Explainable collision risk — computed automatically
-        </motion.h1>
+        </h1>
 
-        <motion.p
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.06, ease: "easeOut" }}
-          className="mt-3 max-w-3xl text-white/80 leading-relaxed"
-        >
-          This page shows the best/closest satellite–debris pair and the decision output. Names come from the
-          TLE files (not placeholders).
-        </motion.p>
+        <p className="mt-3 max-w-3xl text-white/80 leading-relaxed">
+          This page is a readable AI dashboard (not a JSON playground). It shows the selected satellite/debris
+          pair, live computed values, dominant factors, and confidence rationale — updated continuously from
+          WebSocket telemetry.
+        </p>
 
         <div className="mt-8 grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6">
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, ease: "easeOut" }}
-            className="rounded-2xl border border-white/10 bg-white/5 p-6"
-          >
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <div className="text-neon-400 text-xs tracking-[0.24em] uppercase">Selection</div>
 
             <div className="mt-4 space-y-4">
@@ -139,7 +106,7 @@ export default function AIEnginePage() {
                   ) : (
                     satIds.map((id) => (
                       <option key={id} value={id}>
-                        {nameMap[id] ? `${nameMap[id]} (${id})` : id}
+                        {id}
                       </option>
                     ))
                   )}
@@ -158,7 +125,7 @@ export default function AIEnginePage() {
                   ) : (
                     debIds.map((id) => (
                       <option key={id} value={id}>
-                        {nameMap[id] ? `${nameMap[id]} (${id})` : id}
+                        {id}
                       </option>
                     ))
                   )}
@@ -166,25 +133,20 @@ export default function AIEnginePage() {
               </div>
 
               <div className="text-xs text-white/65 leading-relaxed">
-                Backend is broadcasting real TLE propagation every ~2s. Orbit/Scenario pages can still publish
-                synthetic states if you want, but TLE stream is now the default truth.
+                Streaming mode: orbit/scenario pages can publish synthetic states, but your backend also
+                broadcasts real TLE propagation every ~2s.
               </div>
 
               <Link
                 href="/orbit"
                 className="inline-flex w-full items-center justify-center rounded-xl bg-neon-500/10 border border-neon-500/30 px-5 py-3 text-sm font-semibold text-neon-400 shadow-glow hover:bg-neon-500/15 transition"
               >
-                Open Orbit View →
+                Open Orbit Telemetry →
               </Link>
             </div>
-          </motion.div>
+          </div>
 
-          <motion.div
-            initial={{ opacity: 0, y: 14 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.05, ease: "easeOut" }}
-            className="rounded-2xl border border-white/10 bg-white/5 p-6"
-          >
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <div className="flex items-center justify-between">
               <div className="text-neon-400 text-xs tracking-[0.24em] uppercase">Live Report</div>
               <div className="text-xs text-white/60">{status}</div>
@@ -196,13 +158,16 @@ export default function AIEnginePage() {
               <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
                   <div className="text-xs tracking-[0.24em] uppercase text-white/55">Pair</div>
-
                   <div className="mt-2 text-sm text-white/85">
-                    Satellite: <span className="font-semibold">{satLabel}</span>
-                    <div className="text-xs text-white/50 mt-1">{visible.satellite_id}</div>
+                    Satellite:{" "}
+                    <span className="font-semibold">
+                      {visible.satellite_name ? `${visible.satellite_name} (${visible.satellite_id})` : visible.satellite_id}
+                    </span>
                     <br />
-                    Debris: <span className="font-semibold">{debLabel}</span>
-                    <div className="text-xs text-white/50 mt-1">{visible.debris_id}</div>
+                    Debris:{" "}
+                    <span className="font-semibold">
+                      {visible.debris_name ? `${visible.debris_name} (${visible.debris_id})` : visible.debris_id}
+                    </span>
                   </div>
 
                   <div className="mt-4 space-y-3 text-sm text-white/80">
@@ -210,22 +175,18 @@ export default function AIEnginePage() {
                       <span>Risk</span>
                       <span className="font-semibold">{pct(visible.collision_risk)}</span>
                     </div>
-
                     <div className="flex items-center justify-between">
                       <span>Min distance</span>
                       <span className="font-semibold">{visible.min_distance_m.toFixed(1)} m</span>
                     </div>
-
                     <div className="flex items-center justify-between">
                       <span>Time to closest</span>
                       <span className="font-semibold">{visible.time_to_closest_s.toFixed(2)} s</span>
                     </div>
-
                     <div className="flex items-center justify-between">
                       <span>Relative speed</span>
                       <span className="font-semibold">{visible.relative_speed_mps.toFixed(1)} m/s</span>
                     </div>
-
                     <div className="flex items-center justify-between">
                       <span>Confidence</span>
                       <span className="font-semibold">{pct(visible.confidence)}</span>
@@ -235,6 +196,15 @@ export default function AIEnginePage() {
 
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
                   <div className="text-xs tracking-[0.24em] uppercase text-white/55">Explainability</div>
+
+                  <div className="mt-3 text-sm text-white/80 leading-relaxed">
+                    Risk is dominated by three measurable factors:
+                    <ul className="mt-2 list-disc pl-5 text-white/75 space-y-1">
+                      <li>distance vs threshold</li>
+                      <li>relative speed at approach</li>
+                      <li>how soon the approach happens (time window)</li>
+                    </ul>
+                  </div>
 
                   <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
                     <div className="rounded-xl border border-white/10 bg-black/20 p-3">
@@ -258,18 +228,10 @@ export default function AIEnginePage() {
                     </span>{" "}
                     <span className="text-white/60">({visible.decision.severity})</span>
                   </div>
-
-                  {visible.explain.notes?.length ? (
-                    <ul className="mt-3 list-disc pl-5 text-sm text-white/70 space-y-1">
-                      {visible.explain.notes.map((n, i) => (
-                        <li key={i}>{n}</li>
-                      ))}
-                    </ul>
-                  ) : null}
                 </div>
               </div>
             )}
-          </motion.div>
+          </div>
         </div>
       </section>
     </main>
