@@ -1,9 +1,9 @@
-// frontend/app/scenario/page.tsx
 "use client";
 
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { postJSON } from "../../lib/api";
 
 type Decision = {
   action: "NO_ACTION" | "MONITOR" | "AVOIDANCE_MANEUVER";
@@ -71,14 +71,11 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
 export default function ScenarioPage() {
   // Sliders (match screenshot ranges)
   const [closestKm, setClosestKm] = useState(50.0); // 0.1..500
-  const [relVelKms, setRelVelKms] = useState(8.0);  // 1..15
-  const [tcaMin, setTcaMin] = useState(60.0);       // 1..720
-  const [altDiffKm, setAltDiffKm] = useState(5.0);  // 0.1..50
+  const [relVelKms, setRelVelKms] = useState(8.0); // 1..15
+  const [tcaMin, setTcaMin] = useState(60.0); // 1..720
+  const [altDiffKm, setAltDiffKm] = useState(5.0); // 0.1..50
 
-  const debounced = useDebouncedValue(
-    { closestKm, relVelKms, tcaMin, altDiffKm },
-    180
-  );
+  const debounced = useDebouncedValue({ closestKm, relVelKms, tcaMin, altDiffKm }, 180);
 
   const [report, setReport] = useState<PredictionResponse | null>(null);
   const [status, setStatus] = useState<string>("Move sliders to calculate risk…");
@@ -100,19 +97,8 @@ export default function ScenarioPage() {
         if (abortRef.current) abortRef.current.abort();
         abortRef.current = new AbortController();
 
-        const res = await fetch("http://localhost:8000/scenario/predict", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          signal: abortRef.current.signal,
-        });
+        const data = await postJSON<ScenarioRiskResponse>("/scenario/predict", body, abortRef.current.signal);
 
-        if (!res.ok) {
-          const txt = await res.text();
-          throw new Error(`Backend error ${res.status}: ${txt}`);
-        }
-
-        const data = (await res.json()) as ScenarioRiskResponse;
         setReport(data.report);
         setStatus("Updated");
       } catch (e: any) {
@@ -363,7 +349,7 @@ export default function ScenarioPage() {
 
               <div className="pt-3 border-t border-white/10 text-xs text-white/65 leading-relaxed">
                 Note: This is a hypothetical calculator (not SGP4). It is designed to be responsive and produce
-                a wide risk range. 30% risk is classified as MEDIUM by design (your request).
+                a wide risk range.
               </div>
 
               <Link
