@@ -1,0 +1,5 @@
+fastapi
+uvicorn[standard]
+numpy
+pydantic>=2.0.0
+sgp4
