@@ -5,7 +5,6 @@ import { Environment, OrbitControls } from "@react-three/drei";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import Earth from "./Earth";
-import Rocket from "./Rocket";
 import Satellite from "./Satellite";
 import DebrisModel from "./Debris";
 import { connectSocket, publishState, RiskReport, TelemetryEnvelope } from "../lib/socket";
@@ -19,7 +18,7 @@ type Scenario = {
   satelliteType: "standard" | "heavy" | "agile";
   // NEW:
   debrisRadiusDelta?: number; // lets orbits intersect more easily
-  phaseOffset?: number;       // lets you force close approaches
+  phaseOffset?: number; // lets you force close approaches
 };
 
 type Props = {
@@ -367,12 +366,13 @@ function SceneInner({
 
       {showPaths && (mode === "orbit" || mode === "scenario") && (
         <group>
-          <line geometry={orbitGeom.gSat}>
+          {/* Use lineLoop (Three.js) to avoid SVG <line> typing conflict in TS */}
+          <lineLoop geometry={orbitGeom.gSat}>
             <lineBasicMaterial color={new THREE.Color(0.45, 0.9, 1)} transparent opacity={0.22} />
-          </line>
-          <line geometry={orbitGeom.gDeb}>
+          </lineLoop>
+          <lineLoop geometry={orbitGeom.gDeb}>
             <lineBasicMaterial color={new THREE.Color(1, 0.25, 0.45)} transparent opacity={0.18} />
-          </line>
+          </lineLoop>
         </group>
       )}
 
@@ -419,7 +419,10 @@ export default function SpaceScene({
   debrisId,
 }: Props) {
   return (
-    <Canvas camera={{ position: [0, 8, 22], fov: 50, near: 0.1, far: 3000 }} gl={{ antialias: true, powerPreference: "high-performance" }}>
+    <Canvas
+      camera={{ position: [0, 8, 22], fov: 50, near: 0.1, far: 3000 }}
+      gl={{ antialias: true, powerPreference: "high-performance" }}
+    >
       <Suspense fallback={null}>
         <SceneInner
           mode={mode}
