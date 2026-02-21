@@ -1,7 +1,6 @@
 import type { ThreeElements } from "@react-three/fiber";
 
-// This is the most reliable way with React 18 types:
-declare module "react" {
+declare global {
   namespace JSX {
     interface IntrinsicElements extends ThreeElements {}
   }
