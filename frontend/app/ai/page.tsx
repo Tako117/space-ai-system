@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { connectSocket, disconnectSocket, RiskReport, TelemetryEnvelope } from "../../lib/socket";
 
 function clamp01(x: number) {
@@ -19,6 +19,7 @@ export default function AIEnginePage() {
   const [selectedDeb, setSelectedDeb] = useState<string>("");
   const [report, setReport] = useState<RiskReport | null>(null);
   const [status, setStatus] = useState<string>("Waiting for WebSocket telemetry…");
+  const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     const ws = connectSocket((msg: TelemetryEnvelope) => {
@@ -48,14 +49,34 @@ export default function AIEnginePage() {
       if (msg.type === "error") setStatus(msg.message);
     });
 
+    wsRef.current = ws;
+
     return () => {
       try {
         ws.close();
       } catch {}
       disconnectSocket();
+      wsRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // When dropdown selection changes, tell backend to stream the selected pair.
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws) return;
+    if (!selectedSat || !selectedDeb) return;
+    if (ws.readyState !== WebSocket.OPEN) return;
+
+    ws.send(
+      JSON.stringify({
+        type: "select_pair",
+        channel: "telemetry",
+        satellite_id: selectedSat,
+        debris_id: selectedDeb,
+      })
+    );
+  }, [selectedSat, selectedDeb]);
 
   const visible = useMemo(() => report, [report]);
 

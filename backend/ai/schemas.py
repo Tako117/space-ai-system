@@ -47,6 +47,14 @@ class PredictionResponse(BaseModel):
     debris_name: Optional[str] = None
 
     collision_risk: float
+
+    # ✅ Backwards-compatible extension: keep collision_risk as the rule-based value,
+    # but also expose it explicitly for frontend/API consumers.
+    rule_based_risk: Optional[float] = None
+
+    # ✅ ML outputs (optional; present when model is available)
+    ml_probability: Optional[float] = None
+    ml_classification: Optional[Literal["Low", "Medium", "High"]] = None
     time_to_closest_s: float
     confidence: float
     min_distance_m: float
@@ -85,9 +93,12 @@ class WSPublishState(BaseModel):
 
 
 class WSClientMessage(BaseModel):
-    type: Literal["subscribe", "publish_state"]
+    type: Literal["subscribe", "publish_state", "select_pair"]
     channel: Optional[Literal["telemetry"]] = "telemetry"
     state: Optional[PublishedState] = None
+    # Optional per-connection selection for AI Engine (backward compatible)
+    satellite_id: Optional[str] = None
+    debris_id: Optional[str] = None
 
 
 class TelemetryEnvelope(BaseModel):

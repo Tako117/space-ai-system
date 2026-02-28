@@ -1,6 +1,7 @@
 #backend/ai/risk_engine.py
 import numpy as np
 from .orbital_math import vector, relative_motion, predict_min_distance
+from .ml_model import get_model, altitude_km_from_position_m
 from .schemas import (
     DebrisInput,
     SatelliteInput,
@@ -55,6 +56,30 @@ def evaluate_risk_pair(
     min_distance_m, tca_s = predict_min_distance(rel_pos, rel_vel)
     rel_speed_mps = float(np.linalg.norm(rel_vel))
 
+    # --- ML feature extraction (no physics rewrites, just reuse computed values) ---
+    closest_approach_km = float(min_distance_m) / 1000.0
+    relative_velocity_kms = float(rel_speed_mps) / 1000.0
+    time_to_closest_min = float(tca_s) / 60.0
+    try:
+        alt_sat_km = altitude_km_from_position_m((float(sat_pos[0]), float(sat_pos[1]), float(sat_pos[2])))
+        alt_deb_km = altitude_km_from_position_m((float(debris_pos[0]), float(debris_pos[1]), float(debris_pos[2])))
+        altitude_difference_km = float(abs(alt_sat_km - alt_deb_km))
+    except Exception:
+        altitude_difference_km = 0.0
+
+    ml_pred = None
+    m = get_model()
+    if m.is_loaded:
+        try:
+            ml_pred = m.predict(
+                closest_approach_km=closest_approach_km,
+                relative_velocity_kms=relative_velocity_kms,
+                time_to_closest_min=time_to_closest_min,
+                altitude_difference_km=altitude_difference_km,
+            )
+        except Exception:
+            ml_pred = None
+
     # distance_factor: 1 at 0m, 0 at >= threshold
     distance_factor = _clamp01(1.0 - (min_distance_m / COLLISION_THRESHOLD_M))
 
@@ -93,6 +118,9 @@ def evaluate_risk_pair(
         satellite_name=satellite_name,
         debris_name=debris_name,
         collision_risk=collision_risk,
+        rule_based_risk=collision_risk,
+        ml_probability=(ml_pred.probability if ml_pred else None),
+        ml_classification=(ml_pred.classification if ml_pred else None),
         time_to_closest_s=float(tca_s),
         confidence=confidence,
         min_distance_m=float(min_distance_m),
@@ -119,6 +147,9 @@ def evaluate_best_pair(state: PublishedState) -> PredictionResponse:
             satellite_name=sats[0].name if sats else None,
             debris_name=debris[0].name if debris else None,
             collision_risk=0.0,
+            rule_based_risk=0.0,
+            ml_probability=None,
+            ml_classification=None,
             time_to_closest_s=0.0,
             confidence=0.0,
             min_distance_m=1e9,

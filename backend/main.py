@@ -25,6 +25,7 @@ from ai.schemas import (
 from ai.risk_engine import evaluate_risk_pair, evaluate_best_pair
 from ai.tle_propagation import load_tle_file, propagate_many
 from ai.scenario_engine import ScenarioRequest, evaluate_scenario
+from ai.ml_model import load_on_startup, get_model
 
 app = FastAPI()
 
@@ -182,6 +183,33 @@ def _build_published_state_from_propagation(now_states: Dict[str, Any]) -> Publi
     return PublishedState(timestamp=int(time.time()), objects=objects)
 
 
+def _find_object(state: PublishedState, object_id: str) -> Optional[PublishedObject]:
+    for o in state.objects:
+        if o.id == object_id:
+            return o
+    return None
+
+
+def _report_for_pair(state: PublishedState, sat_id: str, deb_id: str) -> Optional[PredictionResponse]:
+    sat = _find_object(state, sat_id)
+    deb = _find_object(state, deb_id)
+    if sat is None or deb is None:
+        return None
+    if sat.kind != "satellite" or deb.kind != "debris":
+        return None
+
+    sat_in = SatelliteInput(position=sat.position_m, velocity=sat.velocity_mps)
+    deb_in = DebrisInput(position=deb.position_m, velocity=deb.velocity_mps)
+    return evaluate_risk_pair(
+        satellite_id=sat.id,
+        debris_id=deb.id,
+        debris=deb_in,
+        satellite=sat_in,
+        satellite_name=sat.name,
+        debris_name=deb.name,
+    )
+
+
 # -------------------------
 # Routes
 # -------------------------
@@ -247,6 +275,20 @@ def scenario_predict(body: ScenarioRequest):
     """
     r = evaluate_scenario(body)
 
+    # ML inference (scenario inputs are already in km / km/s / minutes)
+    ml_pred = None
+    m = get_model()
+    if m.is_loaded:
+        try:
+            ml_pred = m.predict(
+                closest_approach_km=float(body.closest_approach_km),
+                relative_velocity_kms=float(body.relative_velocity_kms),
+                time_to_closest_min=float(body.time_to_closest_min),
+                altitude_difference_km=float(body.altitude_difference_km),
+            )
+        except Exception:
+            ml_pred = None
+
     # Adapt ScenarioResponse -> PredictionResponse
     report = PredictionResponse(
         satellite_id="SCENARIO-SAT",
@@ -254,6 +296,9 @@ def scenario_predict(body: ScenarioRequest):
         satellite_name="Hypothetical Satellite",
         debris_name="Hypothetical Debris",
         collision_risk=float(r.collision_risk),
+        rule_based_risk=float(r.collision_risk),
+        ml_probability=(ml_pred.probability if ml_pred else None),
+        ml_classification=(ml_pred.classification if ml_pred else None),
         time_to_closest_s=float(r.time_to_closest_s),
         confidence=float(r.confidence),
         min_distance_m=float(r.min_distance_m),
@@ -272,7 +317,14 @@ def scenario_predict(body: ScenarioRequest):
         ),
     )
 
-    return {"report": report.model_dump(), "inputs": body.model_dump()}
+    return {
+        "report": report.model_dump(),
+        "inputs": body.model_dump(),
+        # ✅ Convenience top-level fields (requested); safe additive change
+        "rule_based_risk": float(r.collision_risk),
+        "ml_probability": (ml_pred.probability if ml_pred else None),
+        "ml_classification": (ml_pred.classification if ml_pred else None),
+    }
 
 
 @app.websocket("/ws")
@@ -281,6 +333,10 @@ async def websocket_endpoint(ws: WebSocket):
 
     await ws.accept()
     CLIENTS.add(ws)
+
+    # Per-connection selection (AI Engine dropdown). If unset, stream best-pair like before.
+    selected_sat_id: Optional[str] = None
+    selected_deb_id: Optional[str] = None
 
     try:
         # Immediately push latest snapshot on connect (so AI page instantly shows real names)
@@ -309,14 +365,20 @@ async def websocket_endpoint(ws: WebSocket):
             try:
                 text = await asyncio.wait_for(ws.receive_text(), timeout=0.25)
             except asyncio.TimeoutError:
-                # keep-alive: stream report if available
-                if LATEST_REPORT is not None:
+                # keep-alive: stream report (selected pair if chosen, else best pair)
+                report_to_send: Optional[PredictionResponse] = None
+                if selected_sat_id and selected_deb_id and LATEST_STATE is not None:
+                    report_to_send = _report_for_pair(LATEST_STATE, selected_sat_id, selected_deb_id)
+                if report_to_send is None:
+                    report_to_send = LATEST_REPORT
+
+                if report_to_send is not None:
                     await ws.send_text(
                         json.dumps(
                             {
                                 "type": "telemetry_report",
                                 "channel": "telemetry",
-                                "report": LATEST_REPORT.model_dump(),
+                                "report": report_to_send.model_dump(),
                             }
                         )
                     )
@@ -330,6 +392,31 @@ async def websocket_endpoint(ws: WebSocket):
 
             if msg.type == "subscribe":
                 await ws.send_text(json.dumps({"type": "ok", "message": "subscribed"}))
+                continue
+
+            if msg.type == "select_pair":
+                # Backward compatible: frontend may set these to drive live report.
+                if not msg.satellite_id or not msg.debris_id:
+                    await ws.send_text(json.dumps({"type": "error", "message": "select_pair requires satellite_id and debris_id"}))
+                    continue
+
+                selected_sat_id = str(msg.satellite_id)
+                selected_deb_id = str(msg.debris_id)
+
+                # Send an immediate report for responsiveness
+                if LATEST_STATE is not None:
+                    r = _report_for_pair(LATEST_STATE, selected_sat_id, selected_deb_id)
+                    if r is not None:
+                        await ws.send_text(
+                            json.dumps(
+                                {
+                                    "type": "telemetry_report",
+                                    "channel": "telemetry",
+                                    "report": r.model_dump(),
+                                }
+                            )
+                        )
+                await ws.send_text(json.dumps({"type": "ok", "message": f"selected {selected_sat_id} vs {selected_deb_id}"}))
                 continue
 
             # Optional: allow frontend scenes to publish synthetic state
@@ -437,6 +524,9 @@ async def tle_loop():
 @app.on_event("startup")
 async def _startup():
     global _tle_task
+
+    # Load ML model (never blocks service startup if missing/broken)
+    load_on_startup()
 
     if not TLE_STATUS.get("enabled", True):
         return
