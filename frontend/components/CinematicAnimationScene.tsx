@@ -236,10 +236,27 @@ function Driver({
       const target = satRef.current.position.clone();
       const from = debrisStart.clone();
       const to = target.clone();
-
-      // add slight curve so it doesn't look like a straight line in screen-space
-      const curve = new THREE.Vector3(0, 0.8 * Math.sin(u * Math.PI), 0.6 * Math.cos(u * Math.PI));
-      debrisRef.current.position.copy(from.lerp(to, u).add(curve.multiplyScalar(0.35)));
+      const fromLen = from.length();
+      const toLen = to.length();
+      
+      const fromDir = from.clone().normalize();
+      const toDir = to.clone().normalize();
+      
+      let axis = new THREE.Vector3().crossVectors(fromDir, toDir);
+      if (axis.lengthSq() < 1e-5) axis.set(0, 1, 0);
+      axis.normalize();
+      
+      const angle = fromDir.angleTo(toDir);
+      const currentDir = fromDir.clone().applyAxisAngle(axis, angle * u);
+      
+      const bulge = 0.6 * Math.sin(u * Math.PI);
+      const currentLen = THREE.MathUtils.lerp(fromLen, toLen, u) + bulge;
+      
+      debrisRef.current.position.copy(currentDir.multiplyScalar(currentLen));
+      
+      if (debrisRef.current.position.length() < 5.2) {
+        debrisRef.current.position.setLength(5.2);
+      }
 
       const dist = debrisRef.current.position.distanceTo(target);
       if (dist < 0.35) {

@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import Header from "../../components/Header";
 import { connectSocket, disconnectSocket, RiskReport, TelemetryEnvelope } from "../../lib/socket";
 
 function clamp01(x: number) {
@@ -15,15 +16,30 @@ function pct(x: number) {
 export default function AIEnginePage() {
   const [satIds, setSatIds] = useState<string[]>([]);
   const [debIds, setDebIds] = useState<string[]>([]);
+  const [objectNames, setObjectNames] = useState<Record<string, string>>({});
   const [selectedSat, setSelectedSat] = useState<string>("");
   const [selectedDeb, setSelectedDeb] = useState<string>("");
   const [report, setReport] = useState<RiskReport | null>(null);
   const [status, setStatus] = useState<string>("Waiting for WebSocket telemetry…");
   const wsRef = useRef<WebSocket | null>(null);
 
+  // Keep a mutable reference to the latest selected IDs to use inside the closure
+  const selectedSatRef = useRef(selectedSat);
+  const selectedDebRef = useRef(selectedDeb);
   useEffect(() => {
-    const ws = connectSocket((msg: TelemetryEnvelope) => {
+    selectedSatRef.current = selectedSat;
+    selectedDebRef.current = selectedDeb;
+  }, [selectedSat, selectedDeb]);
+
+  useEffect(() => {
+    const handleMessage = (msg: TelemetryEnvelope) => {
       if (msg.type === "telemetry_state") {
+        const names: Record<string, string> = {};
+        msg.state.objects.forEach((o) => {
+          if (o.name) names[o.id] = o.name;
+        });
+        setObjectNames((prev) => ({ ...prev, ...names }));
+
         const sats = msg.state.objects
           .filter((o) => o.kind === "satellite")
           .map((o) => o.id);
@@ -42,12 +58,24 @@ export default function AIEnginePage() {
       }
 
       if (msg.type === "telemetry_report") {
-        setReport(msg.report);
-        setStatus("Live report updated");
+        const tgtSat = selectedSatRef.current;
+        const tgtDeb = selectedDebRef.current;
+        
+        // Strict pair identity match.
+        // Accept if it's explicitly our pair, or if we haven't selected anything yet.
+        const isOurSat = !tgtSat || msg.report.satellite_id === tgtSat;
+        const isOurDeb = !tgtDeb || msg.report.debris_id === tgtDeb;
+        
+        if (isOurSat && isOurDeb) {
+          setReport(msg.report);
+          setStatus("Live report updated");
+        }
       }
 
       if (msg.type === "error") setStatus(msg.message);
-    });
+    };
+
+    const ws = connectSocket(handleMessage);
 
     wsRef.current = ws;
 
@@ -55,7 +83,7 @@ export default function AIEnginePage() {
       try {
         ws.close();
       } catch {}
-      disconnectSocket();
+      disconnectSocket(handleMessage);
       wsRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -66,40 +94,55 @@ export default function AIEnginePage() {
     const ws = wsRef.current;
     if (!ws) return;
     if (!selectedSat || !selectedDeb) return;
-    if (ws.readyState !== WebSocket.OPEN) return;
 
-    ws.send(
-      JSON.stringify({
-        type: "select_pair",
-        channel: "telemetry",
-        satellite_id: selectedSat,
-        debris_id: selectedDeb,
-      })
-    );
+    const payload = JSON.stringify({
+      type: "select_pair",
+      channel: "telemetry",
+      satellite_id: selectedSat,
+      debris_id: selectedDeb,
+    });
+
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(payload);
+    } else if (ws.readyState === WebSocket.CONNECTING) {
+      const onOpen = () => ws.send(payload);
+      ws.addEventListener("open", onOpen, { once: true });
+    }
   }, [selectedSat, selectedDeb]);
 
   const visible = useMemo(() => report, [report]);
 
+  const decisionBadge = useMemo(() => {
+    if (!visible) return { cls: "text-white/60", bgCls: "bg-white/10" };
+    const sev = visible.decision.severity;
+    const isCritical = sev === "CRITICAL";
+    const isHigh = sev === "HIGH";
+    const isMed = sev === "MEDIUM";
+
+    const cls = isCritical
+      ? "text-red-400"
+      : isHigh
+      ? "text-orange-400"
+      : isMed
+      ? "text-yellow-400"
+      : "text-emerald-400";
+      
+    const bgCls = isCritical
+      ? "bg-red-500"
+      : isHigh
+      ? "bg-orange-500"
+      : isMed
+      ? "bg-yellow-500"
+      : "bg-emerald-500";
+      
+    return { cls, bgCls };
+  }, [visible]);
+
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-space-950/70 backdrop-blur-md">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-2.5 w-2.5 rounded-full bg-neon-500 shadow-glow" />
-            <span className="tracking-tight font-semibold">AI Risk & Detection Engine</span>
-          </div>
-          <nav className="flex gap-4 text-sm text-white/80">
-            <Link className="hover:text-white" href="/">Landing</Link>
-            <Link className="hover:text-white" href="/problem">Problem</Link>
-            <Link className="hover:text-white" href="/orbit">Orbit</Link>
-            <Link className="text-white" href="/ai">AI Engine</Link>
-            <Link className="hover:text-white" href="/scenario">Scenario</Link>
-            <Link className="hover:text-white" href="/animation">Animation</Link>
-          </nav>
-        </div>
-      </header>
+      <Header />
 
-      <section className="mx-auto max-w-6xl px-6 pt-10 pb-12">
+      <section className="mx-auto max-w-6xl px-6 pt-16 pb-12">
         <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">
           Explainable collision risk — computed automatically
         </h1>
@@ -127,7 +170,7 @@ export default function AIEnginePage() {
                   ) : (
                     satIds.map((id) => (
                       <option key={id} value={id}>
-                        {id}
+                        {objectNames[id] ? `${objectNames[id]} (${id})` : id}
                       </option>
                     ))
                   )}
@@ -146,7 +189,7 @@ export default function AIEnginePage() {
                   ) : (
                     debIds.map((id) => (
                       <option key={id} value={id}>
-                        {id}
+                        {objectNames[id] ? `${objectNames[id]} (${id})` : id}
                       </option>
                     ))
                   )}
@@ -167,87 +210,105 @@ export default function AIEnginePage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+          <div className="rounded-3xl border border-white/5 bg-black/20 p-8 shadow-lg">
             <div className="flex items-center justify-between">
-              <div className="text-neon-400 text-xs tracking-[0.24em] uppercase">Live Report</div>
-              <div className="text-xs text-white/60">{status}</div>
+              <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold">Current Assessment</div>
+              <div className="text-sm font-medium text-white/50">{status}</div>
             </div>
 
             {!visible ? (
-              <div className="mt-6 text-sm text-white/70">Waiting for WebSocket telemetry…</div>
+              <div className="mt-8 text-sm text-white/30">Waiting for WebSocket telemetry…</div>
             ) : (
-              <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <div className="text-xs tracking-[0.24em] uppercase text-white/55">Pair</div>
-                  <div className="mt-2 text-sm text-white/85">
-                    Satellite:{" "}
-                    <span className="font-semibold">
-                      {visible.satellite_name ? `${visible.satellite_name} (${visible.satellite_id})` : visible.satellite_id}
-                    </span>
-                    <br />
-                    Debris:{" "}
-                    <span className="font-semibold">
-                      {visible.debris_name ? `${visible.debris_name} (${visible.debris_id})` : visible.debris_id}
-                    </span>
+              <div className="mt-8 grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-8">
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-6 shadow-inner">
+                  <div className="flex flex-col gap-4 border-b border-white/5 pb-6">
+                    <div className="text-[10px] tracking-[0.24em] uppercase text-white/30 font-semibold">Active Pair</div>
+                    <div className="text-lg text-white/80 leading-relaxed">
+                      Sat: <span className="font-semibold text-white/95">{visible.satellite_name ? `${visible.satellite_name} (${visible.satellite_id})` : visible.satellite_id}</span>
+                      <br />
+                      Deb: <span className="font-semibold text-white/95">{visible.debris_name ? `${visible.debris_name} (${visible.debris_id})` : visible.debris_id}</span>
+                    </div>
                   </div>
 
-                  <div className="mt-4 space-y-3 text-sm text-white/80">
-                    <div className="flex items-center justify-between">
-                      <span>Risk</span>
-                      <span className="font-semibold">{pct(visible.collision_risk)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
+                  <div className="mt-6 flex items-center justify-between">
+                    <span className="text-[11px] uppercase tracking-wider text-white/40">Final Risk</span>
+                    <span className={`text-3xl font-semibold tracking-tight ${decisionBadge.cls}`}>
+                      {pct(visible.final_risk ?? visible.collision_risk)}
+                    </span>
+                  </div>
+                  
+                  <div className="mt-4 h-2 w-full rounded-full bg-black/40 overflow-hidden ring-1 ring-white/5 inset-shadow">
+                    <div
+                      className={`h-full ${decisionBadge.bgCls} transition-all duration-500 ease-out`}
+                      style={{ width: `${clamp01(visible.final_risk ?? visible.collision_risk) * 100}%` }}
+                    />
+                  </div>
+
+                  <div className="mt-6 space-y-4 text-[13px] text-white/60">
+                    {visible.rule_based_risk !== undefined && (
+                      <div className="flex items-center justify-between">
+                        <span className="pl-1">↳ Rule-based</span>
+                        <span className="font-medium text-white/80">{pct(visible.rule_based_risk)}</span>
+                      </div>
+                    )}
+                    {visible.ml_probability !== undefined && visible.ml_probability !== null && (
+                      <div className="flex items-center justify-between">
+                        <span className="pl-1">↳ ML Prediction</span>
+                        <span className="font-medium text-white/80">{pct(visible.ml_probability)} ({visible.ml_classification})</span>
+                      </div>
+                    )}
+                    <div className="pt-2 flex items-center justify-between border-t border-white/5">
                       <span>Min distance</span>
-                      <span className="font-semibold">{visible.min_distance_m.toFixed(1)} m</span>
+                      <span className="text-white/85">{visible.min_distance_m.toFixed(1)} m</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Time to closest</span>
-                      <span className="font-semibold">{visible.time_to_closest_s.toFixed(2)} s</span>
+                      <span className="text-white/85">{visible.time_to_closest_s.toFixed(2)} s</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Relative speed</span>
-                      <span className="font-semibold">{visible.relative_speed_mps.toFixed(1)} m/s</span>
+                      <span className="text-white/85">{visible.relative_speed_mps.toFixed(1)} m/s</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span>Confidence</span>
-                      <span className="font-semibold">{pct(visible.confidence)}</span>
+                      <span className="text-white/85">{pct(visible.confidence)}</span>
                     </div>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <div className="text-xs tracking-[0.24em] uppercase text-white/55">Explainability</div>
+                <div className="rounded-2xl border border-white/5 bg-[#0b0e14] p-6 shadow-sm">
+                  <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold">Risk Drivers</div>
 
-                  <div className="mt-3 text-sm text-white/80 leading-relaxed">
+                  <div className="mt-4 text-[13px] text-white/50 leading-relaxed">
                     Risk is dominated by three measurable factors:
-                    <ul className="mt-2 list-disc pl-5 text-white/75 space-y-1">
+                    <ul className="mt-2 list-disc pl-5 space-y-1.5">
                       <li>distance vs threshold</li>
                       <li>relative speed at approach</li>
-                      <li>how soon the approach happens (time window)</li>
+                      <li>how soon the approach happens</li>
                     </ul>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">Distance</div>
-                      <div className="mt-1 font-semibold">{pct(visible.explain.distance_factor)}</div>
+                  <div className="mt-6 grid grid-cols-1 gap-4 text-sm">
+                    <div className="flex flex-col gap-1 border-b border-white/5 pb-3">
+                      <div className="text-[10px] tracking-[0.22em] uppercase text-white/30">Distance</div>
+                      <div className="mt-1 text-lg font-semibold text-white/90">{pct(visible.explain.distance_factor)}</div>
                     </div>
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">Speed</div>
-                      <div className="mt-1 font-semibold">{pct(visible.explain.speed_factor)}</div>
+                    <div className="flex flex-col gap-1 border-b border-white/5 pb-3">
+                      <div className="text-[10px] tracking-[0.22em] uppercase text-white/30">Speed</div>
+                      <div className="mt-1 text-lg font-semibold text-white/90">{pct(visible.explain.speed_factor)}</div>
                     </div>
-                    <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                      <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">Timing</div>
-                      <div className="mt-1 font-semibold">{pct(visible.explain.tca_factor)}</div>
+                    <div className="flex flex-col gap-1 border-b border-white/5 pb-3">
+                      <div className="text-[10px] tracking-[0.22em] uppercase text-white/30">Timing</div>
+                      <div className="mt-1 text-lg font-semibold text-white/90">{pct(visible.explain.tca_factor)}</div>
                     </div>
                   </div>
 
-                  <div className="mt-4 text-sm">
-                    Decision:{" "}
-                    <span className="font-semibold text-white">
+                  <div className="mt-6 pt-4 border-t border-white/10">
+                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/30 mb-2">Recommended Response</div>
+                    <div className={`text-lg font-semibold tracking-tight ${decisionBadge.cls}`}>
                       {visible.decision.action.replaceAll("_", " ")}
-                    </span>{" "}
-                    <span className="text-white/60">({visible.decision.severity})</span>
+                    </div>
+                    <div className="text-xs text-white/40 mt-1 uppercase tracking-widest">{visible.decision.severity}</div>
                   </div>
                 </div>
               </div>

@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import Header from "../../components/Header";
 import SpaceScene from "../../components/SpaceScene";
 import { useMemo, useState } from "react";
 import type { RiskReport } from "../../lib/socket";
@@ -20,42 +21,31 @@ export default function OrbitPage() {
   const badge = useMemo(() => {
     if (!report) return { label: "Waiting for telemetry…", cls: "text-white/60" };
     const sev = report.decision?.severity ?? "LOW";
-    const cls =
-      sev === "CRITICAL"
-        ? "text-red-300"
-        : sev === "HIGH"
-        ? "text-orange-300"
-        : sev === "MEDIUM"
-        ? "text-yellow-300"
-        : "text-emerald-300";
-    return { label: `${sev} • ${pct(report.collision_risk)} risk`, cls };
+    const isCritical = sev === "CRITICAL";
+    const isHigh = sev === "HIGH";
+    const isMed = sev === "MEDIUM";
+
+    const cls = isCritical
+      ? "text-red-400"
+      : isHigh
+      ? "text-orange-400"
+      : isMed
+      ? "text-yellow-400"
+      : "text-emerald-400";
+
+    return { label: `${sev} • ${pct(report.final_risk ?? report.collision_risk)}`, cls };
   }, [report]);
 
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-space-950/70 backdrop-blur-md">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-2.5 w-2.5 rounded-full bg-neon-500 shadow-glow" />
-            <span className="tracking-tight font-semibold">Orbital Visualization</span>
-          </div>
-          <nav className="flex gap-4 text-sm text-white/80">
-            <Link className="hover:text-white" href="/">Landing</Link>
-            <Link className="hover:text-white" href="/problem">Problem</Link>
-            <Link className="text-white" href="/orbit">Orbit</Link>
-            <Link className="hover:text-white" href="/ai">AI Engine</Link>
-            <Link className="hover:text-white" href="/scenario">Scenario</Link>
-            <Link className="hover:text-white" href="/animation">Animation</Link>
-          </nav>
-        </div>
-      </header>
+      <Header />
 
-      <section className="mx-auto max-w-6xl px-6 pt-10 pb-6">
+      <section className="mx-auto max-w-6xl px-6 pt-16 pb-10">
         <motion.h1
           initial={{ opacity: 0, y: 14 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          className="text-3xl md:text-5xl font-semibold tracking-tight"
+          className="text-3xl md:text-5xl font-semibold tracking-tight text-white"
         >
           Live orbit + collision telemetry
         </motion.h1>
@@ -64,60 +54,74 @@ export default function OrbitPage() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.06, ease: "easeOut" }}
-          className="mt-3 max-w-3xl text-white/80 leading-relaxed"
+          className="mt-4 max-w-3xl text-white/60 leading-relaxed font-light text-lg"
         >
           Technical view. Streams multi-object state to the backend and renders velocity vectors,
           orbit paths, and closest-approach highlighting. Camera is fully movable.
         </motion.p>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 pb-14">
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-          <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 h-[560px]">
-            <SpaceScene
-              mode="orbit"
-              showDebris={showDebris}
-              showPaths={showPaths}
-              onReport={(r) => setReport(r)}
-            />
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8">
+          <div className="space-y-6">
+            <div className="relative overflow-hidden rounded-3xl border border-white/5 bg-black/20 h-[520px] shadow-inner ring-1 ring-white/5">
+              <SpaceScene
+                mode="orbit"
+                showDebris={showDebris}
+                showPaths={showPaths}
+                onReport={(r) => setReport(r)}
+              />
+            </div>
 
-            {/* HTML overlay telemetry */}
-            <div className="absolute left-4 right-4 bottom-4 pointer-events-none">
-              <div className="rounded-2xl border border-white/10 bg-black/35 backdrop-blur-sm p-4">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs tracking-[0.24em] uppercase text-white/60">
-                    Closest Approach
+            {/* Assessment Panel Docked Below */}
+            <div className="rounded-3xl border border-white/10 bg-black/40 backdrop-blur-md p-6 shadow-2xl">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] tracking-[0.24em] uppercase text-white/50 font-semibold">
+                  Current Assessment
+                </div>
+                <div className={`text-lg font-semibold tracking-tight ${badge.cls}`}>{badge.label}</div>
+              </div>
+
+              <div className="mt-5 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 text-sm">
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-4 flex flex-col justify-between">
+                  <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">Final Risk</div>
+                  <div className="mt-2 text-lg font-semibold text-white/90">
+                    {report ? pct(report.final_risk ?? report.collision_risk) : "—"}
                   </div>
-                  <div className={`text-xs font-semibold ${badge.cls}`}>{badge.label}</div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-4 gap-3 text-sm">
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">Risk</div>
-                    <div className="mt-1 font-semibold">
-                      {report ? pct(report.collision_risk) : "—"}
-                    </div>
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-4 flex flex-col justify-between">
+                  <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">ML Model</div>
+                  <div className="mt-2 text-lg font-semibold text-white/90">
+                    {report?.ml_probability !== undefined && report.ml_probability !== null ? pct(report.ml_probability) : "—"}
                   </div>
+                </div>
 
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">Confidence</div>
-                    <div className="mt-1 font-semibold">
-                      {report ? pct(report.confidence) : "—"}
-                    </div>
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-4 flex flex-col justify-between">
+                  <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">Rule Engine</div>
+                  <div className="mt-2 text-lg font-semibold text-white/90">
+                    {report?.rule_based_risk !== undefined ? pct(report.rule_based_risk) : "—"}
                   </div>
+                </div>
 
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">Min distance</div>
-                    <div className="mt-1 font-semibold">
-                      {report ? `${report.min_distance_m.toFixed(1)} m` : "—"}
-                    </div>
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-4 flex flex-col justify-between">
+                  <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">Confidence</div>
+                  <div className="mt-2 text-lg font-semibold text-white/90">
+                    {report ? pct(report.confidence) : "—"}
                   </div>
+                </div>
 
-                  <div className="rounded-xl border border-white/10 bg-black/20 p-3">
-                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/55">TCA</div>
-                    <div className="mt-1 font-semibold">
-                      {report ? `${report.time_to_closest_s.toFixed(2)} s` : "—"}
-                    </div>
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-4 flex flex-col justify-between">
+                  <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">Min Distance</div>
+                  <div className="mt-2 text-lg font-semibold text-white/90">
+                    {report ? `${report.min_distance_m.toFixed(1)} m` : "—"}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-white/5 bg-white/5 p-4 flex flex-col justify-between">
+                  <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">TCA</div>
+                  <div className="mt-2 text-lg font-semibold text-white/90">
+                    {report ? `${report.time_to_closest_s.toFixed(2)} s` : "—"}
                   </div>
                 </div>
               </div>

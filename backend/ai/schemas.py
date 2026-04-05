@@ -46,11 +46,10 @@ class PredictionResponse(BaseModel):
     satellite_name: Optional[str] = None
     debris_name: Optional[str] = None
 
-    collision_risk: float
+    collision_risk: float # alias for backward compatibility
 
-    # ✅ Backwards-compatible extension: keep collision_risk as the rule-based value,
-    # but also expose it explicitly for frontend/API consumers.
-    rule_based_risk: Optional[float] = None
+    final_risk: float
+    rule_based_risk: float
 
     # ✅ ML outputs (optional; present when model is available)
     ml_probability: Optional[float] = None

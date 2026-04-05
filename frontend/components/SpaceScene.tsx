@@ -7,7 +7,7 @@ import * as THREE from "three";
 import Earth from "./Earth";
 import Satellite from "./Satellite";
 import DebrisModel from "./Debris";
-import { connectSocket, publishState, RiskReport, TelemetryEnvelope } from "../lib/socket";
+import { connectSocket, disconnectSocket, publishState, RiskReport, TelemetryEnvelope } from "../lib/socket";
 
 type Mode = "landing" | "problem" | "orbit" | "scenario" | "animation";
 
@@ -113,15 +113,7 @@ function VelocityVectors({
   return null;
 }
 
-function ClosestApproachMarker({ position, enabled }: { position: THREE.Vector3; enabled: boolean }) {
-  if (!enabled) return null;
-  return (
-    <mesh position={position}>
-      <sphereGeometry args={[0.18, 24, 24]} />
-      <meshStandardMaterial emissive={new THREE.Color(1, 0.35, 0.55)} emissiveIntensity={2.2} />
-    </mesh>
-  );
-}
+// Marker removed intentionally - caused visual distraction and lacked 3D contextual grounding
 
 function SceneInner({
   mode,
@@ -185,6 +177,10 @@ function SceneInner({
     markerPos: new THREE.Vector3(0, 0, 0),
   });
 
+  const satGroupRef = useRef<THREE.Group>(null);
+  const debrisGroupRef = useRef<THREE.Group>(null);
+  const debrisPointsRefs = useRef<(THREE.Group | null)[]>([]);
+
   useEffect(() => {
     const sim = simRef.current;
     sim.satRadius = 8.8 * s.orbitAltitude;
@@ -231,23 +227,53 @@ function SceneInner({
     };
   }, [s.orbitAltitude, s.debrisRadiusDelta]);
 
+  const activePairRef = useRef<{ sat: string; deb: string; lockedUntil: number } | null>(null);
+
   useEffect(() => {
-    const ws = connectSocket((msg: TelemetryEnvelope) => {
+    const handleMessage = (msg: TelemetryEnvelope) => {
       if (msg.type === "telemetry_report") {
-        setLatestReport(msg.report);
-        onReport?.(msg.report);
+        const r = msg.report;
+        const shouldPublish = mode === "orbit" || mode === "scenario";
+        
+        // If we are producing local synthetic orbits, ignore global TLE broadcasts
+        if (shouldPublish) {
+          const mySatId = satelliteId || "SAT-1";
+          if (r.satellite_id !== mySatId) return;
+        }
+
+        // Hysteresis lock to stop "best pair" from flickering every tick
+        const now = Date.now();
+        if (!activePairRef.current) {
+          activePairRef.current = { sat: r.satellite_id, deb: r.debris_id, lockedUntil: now + 3000 };
+        } else {
+          const isSame = activePairRef.current.sat === r.satellite_id && activePairRef.current.deb === r.debris_id;
+          if (isSame) {
+            activePairRef.current.lockedUntil = now + 3000;
+          } else {
+            if (now < activePairRef.current.lockedUntil) {
+              return; // We are tracking a locked pair, ignore this flicker
+            } else {
+              activePairRef.current = { sat: r.satellite_id, deb: r.debris_id, lockedUntil: now + 3000 };
+            }
+          }
+        }
+
+        setLatestReport(r);
+        onReport?.(r);
       } else if (msg.type === "telemetry_state") {
         const sats = msg.state.objects.filter((o) => o.kind === "satellite").map((o) => o.id);
         const debs = msg.state.objects.filter((o) => o.kind === "debris").map((o) => o.id);
         onStateIds?.({ satellites: sats, debris: debs });
       }
-    });
+    };
+    const ws = connectSocket(handleMessage);
 
     wsRef.current = ws;
     return () => {
       try {
         ws.close();
       } catch {}
+      disconnectSocket(handleMessage);
       wsRef.current = null;
     };
   }, [onReport, onStateIds]);
@@ -282,21 +308,34 @@ function SceneInner({
     satRot.current.y += 0.005;
     debrisRot.current.z += 0.01;
 
-    // closest approach marker (from backend report if exists)
-    if (latestReport && Number.isFinite(latestReport.time_to_closest_s)) {
-      const tca = Math.max(0, Math.min(600, latestReport.time_to_closest_s));
-      const satPosM = sim.satPos.clone().multiplyScalar(unitToMeters);
-      const debPosM = sim.debrisPos.clone().multiplyScalar(unitToMeters);
-      const satVelMps = sim.satVel.clone().multiplyScalar(unitToMeters);
-      const debVelMps = sim.debrisVel.clone().multiplyScalar(unitToMeters);
+    // Closest approach marker calculation removed
 
-      const satAt = satPosM.addScaledVector(satVelMps, tca);
-      const debAt = debPosM.addScaledVector(debVelMps, tca);
-      const mid = satAt.add(debAt).multiplyScalar(0.5);
-      sim.markerPos.copy(mid.multiplyScalar(1 / unitToMeters));
-    } else {
-      sim.markerPos.copy(sim.satPos.clone().add(sim.debrisPos).multiplyScalar(0.5));
+    // STRICT CLAMPING: Objects must NEVER render inside Earth radius (5.0)
+    const EARTH_SURFACE = 5.2;
+    if (sim.satPos.length() < EARTH_SURFACE) sim.satPos.setLength(EARTH_SURFACE);
+    if (sim.debrisPos.length() < EARTH_SURFACE) sim.debrisPos.setLength(EARTH_SURFACE);
+    for (const d of sim.debrisPoints) {
+      if (d.p.length() < EARTH_SURFACE) d.p.setLength(EARTH_SURFACE);
     }
+
+    // Apply exact positions via refs so React doesn't ignore mutated vectors
+    if (satGroupRef.current) {
+      satGroupRef.current.position.copy(sim.satPos);
+      satGroupRef.current.rotation.copy(satRot.current);
+    }
+    if (debrisGroupRef.current) {
+      debrisGroupRef.current.position.copy(sim.debrisPos);
+      debrisGroupRef.current.rotation.copy(debrisRot.current);
+    }
+    sim.debrisPoints.forEach((d, i) => {
+      const dbRef = debrisPointsRefs.current[i];
+      if (dbRef) {
+        dbRef.position.copy(d.p);
+        dbRef.rotation.copy(debrisRot.current);
+      }
+    });
+
+    // Apply exact positions via refs so React doesn't ignore mutated vectors
 
     // publish state ONLY orbit/scenario
     const shouldPublish = mode === "orbit" || mode === "scenario";
@@ -376,33 +415,36 @@ function SceneInner({
         </group>
       )}
 
-      <Satellite position={simRef.current.satPos} rotation={satRot.current} damaged={false} />
+      <group ref={satGroupRef}>
+        <Satellite position={new THREE.Vector3()} rotation={new THREE.Euler()} damaged={false} />
+      </group>
 
       {(showDebris || mode === "animation") && (
-        <DebrisModel position={simRef.current.debrisPos} rotation={debrisRot.current} />
+        <group ref={debrisGroupRef}>
+          <DebrisModel position={new THREE.Vector3()} rotation={new THREE.Euler()} />
+        </group>
       )}
 
       {showDebris && (mode === "orbit" || mode === "scenario") && (
         <>
           {simRef.current.debrisPoints
             .slice(0, Math.min(18, simRef.current.debrisPoints.length))
-            .map((d) => (
-              <DebrisModel key={d.id} position={d.p} rotation={debrisRot.current} desiredSize={0.45} />
+            .map((d, i) => (
+              <group key={d.id} ref={(el) => { debrisPointsRefs.current[i] = el; }}>
+                <DebrisModel position={new THREE.Vector3()} rotation={new THREE.Euler()} desiredSize={0.45} />
+              </group>
             ))}
         </>
       )}
 
       {(mode === "orbit" || mode === "scenario") && (
-        <>
-          <VelocityVectors
-            enabled={true}
-            satPos={simRef.current.satPos}
-            satVel={simRef.current.satVel}
-            debPos={simRef.current.debrisPos}
-            debVel={simRef.current.debrisVel}
-          />
-          <ClosestApproachMarker enabled={true} position={simRef.current.markerPos} />
-        </>
+        <VelocityVectors
+          enabled={true}
+          satPos={simRef.current.satPos}
+          satVel={simRef.current.satVel}
+          debPos={simRef.current.debrisPos}
+          debVel={simRef.current.debrisVel}
+        />
       )}
     </>
   );

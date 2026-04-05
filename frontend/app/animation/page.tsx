@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import Header from "../../components/Header";
 import CinematicAnimationScene from "../../components/CinematicAnimationScene";
 
 export default function AnimationPage() {
@@ -10,23 +11,7 @@ export default function AnimationPage() {
 
   return (
     <main className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-space-950/70 backdrop-blur-md">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-2.5 w-2.5 rounded-full bg-neon-500 shadow-glow" />
-            <span className="tracking-tight font-semibold">Animation</span>
-          </div>
-
-          <nav className="flex gap-4 text-sm text-white/80">
-            <Link className="hover:text-white" href="/">Landing</Link>
-            <Link className="hover:text-white" href="/problem">Problem</Link>
-            <Link className="hover:text-white" href="/orbit">Orbit</Link>
-            <Link className="hover:text-white" href="/ai">AI Engine</Link>
-            <Link className="hover:text-white" href="/scenario">Scenario</Link>
-            <Link className="text-white" href="/animation">Animation</Link>
-          </nav>
-        </div>
-      </header>
+      <Header />
 
       <section className="mx-auto max-w-6xl px-6 pt-10 pb-6">
         <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">
@@ -55,8 +40,8 @@ export default function AnimationPage() {
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-6 pb-14">
-        <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 h-[70vh] min-h-[520px]">
+      <section className="mx-auto max-w-6xl px-6 pb-20">
+        <div className="relative overflow-hidden rounded-3xl border border-white/5 bg-black/20 h-[70vh] min-h-[520px] shadow-inner ring-1 ring-white/5">
           {/* key forces full remount = true restart */}
           <div key={restartKey} className="absolute inset-0">
             <CinematicAnimationScene />

@@ -1,7 +1,8 @@
 {
-  "created_utc": "2026-02-28T14:24:08.480326+00:00",
+  "created_utc": "2026-04-03T16:37:19.316087+00:00",
   "n_samples": 250000,
   "seed": 42,
+  "provenance": "synthetic",
   "feature_names": [
     "closest_approach_km",
     "relative_velocity_kms",
@@ -12,10 +13,13 @@
     "urgency",
     "alt_penalty"
   ],
+  "feature_mapping_used": "synthetic (built-in)",
+  "target_col": "collision_risk",
   "metrics": {
-    "mae": 0.00482642314225212,
-    "rmse": 0.007775694869429356,
-    "r2": 0.9995785537669543
+    "test_mae": 0.004873058084221464,
+    "test_rmse": 0.00792199795166691,
+    "test_r2": 0.9995625451778076,
+    "val_r2": 0.9995542287560746
   },
-  "sklearn": "GradientBoostingRegressor"
+  "sklearn_model": "GradientBoostingRegressor"
 }

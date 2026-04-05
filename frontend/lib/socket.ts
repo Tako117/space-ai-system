@@ -33,7 +33,12 @@ export type RiskReport = {
   satellite_name?: string | null;
   debris_name?: string | null;
 
-  collision_risk: number; // 0..1
+  collision_risk: number; // alias for final_risk
+  final_risk?: number;
+  rule_based_risk?: number;
+  ml_probability?: number | null;
+  ml_classification?: "Low" | "Medium" | "High" | null;
+
   confidence: number; // 0..1
   min_distance_m: number;
   time_to_closest_s: number;
@@ -54,6 +59,7 @@ export type WSClientHello =
 
 let sharedWS: WebSocket | null = null;
 let sharedWSUsers = 0;
+let messageHandlers = new Set<(data: TelemetryEnvelope) => void>();
 
 function backendBaseUrl(): string {
   // On Render you set NEXT_PUBLIC_BACKEND_URL=https://space-ai-system.onrender.com
@@ -79,17 +85,12 @@ function wsUrl(): string {
 
 export function connectSocket(onMessage: (data: TelemetryEnvelope) => void) {
   sharedWSUsers += 1;
+  messageHandlers.add(onMessage);
 
   if (
     sharedWS &&
     (sharedWS.readyState === WebSocket.OPEN || sharedWS.readyState === WebSocket.CONNECTING)
   ) {
-    // attach listener for this consumer
-    sharedWS.addEventListener("message", (event) => {
-      try {
-        onMessage(JSON.parse(event.data));
-      } catch {}
-    });
     return sharedWS;
   }
 
@@ -103,7 +104,8 @@ export function connectSocket(onMessage: (data: TelemetryEnvelope) => void) {
 
   ws.onmessage = (event) => {
     try {
-      onMessage(JSON.parse(event.data));
+      const data = JSON.parse(event.data);
+      messageHandlers.forEach((handler) => handler(data));
     } catch {
       // ignore malformed payloads
     }
@@ -116,7 +118,11 @@ export function connectSocket(onMessage: (data: TelemetryEnvelope) => void) {
   return ws;
 }
 
-export function disconnectSocket() {
+export function disconnectSocket(onMessage?: (data: TelemetryEnvelope) => void) {
+  if (onMessage) {
+    messageHandlers.delete(onMessage);
+  }
+
   sharedWSUsers = Math.max(0, sharedWSUsers - 1);
 
   if (sharedWSUsers === 0 && sharedWS) {
@@ -124,6 +130,7 @@ export function disconnectSocket() {
       sharedWS.close();
     } catch {}
     sharedWS = null;
+    messageHandlers.clear();
   }
 }
 

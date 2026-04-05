@@ -91,7 +91,24 @@ def evaluate_risk_pair(
 
     # Weighted risk (distance dominates)
     raw = 0.72 * distance_factor + 0.18 * speed_factor + 0.10 * tca_factor
-    collision_risk = _clamp01(raw)
+    rule_based_risk = _clamp01(raw)
+
+    ml_prob = ml_pred.probability if ml_pred else None
+    ml_class = ml_pred.classification if ml_pred else None
+
+    # --- Calibrated Fusion Step ---
+    # Guardrail 1: fallback to rule-based if ML is unavailable or invalid
+    if ml_prob is not None and 0.0 <= ml_prob <= 1.0:
+        final_risk = 0.7 * rule_based_risk + 0.3 * ml_prob
+        # Guardrail 2: if either score indicates high risk, allow safety override upward
+        if rule_based_risk >= 0.4 or ml_prob >= 0.4:
+            final_risk = max(final_risk, max(rule_based_risk, ml_prob))
+    else:
+        final_risk = rule_based_risk
+        ml_prob = None
+        ml_class = None
+
+    final_risk = _clamp01(final_risk)
 
     # Confidence: reduces if TCA is far
     conf_raw = 0.55 * speed_factor + 0.45 * _clamp01(1.0 - (tca_s / 220.0))
@@ -104,10 +121,10 @@ def evaluate_risk_pair(
         notes.append("Low relative speed: risk is sensitive to distance uncertainty.")
     if min_distance_m > COLLISION_THRESHOLD_M:
         notes.append("Closest approach exceeds threshold: risk decays rapidly.")
-    if collision_risk >= 0.15:
+    if final_risk >= 0.15:
         notes.append("Risk exceeds operator threshold: avoidance or strong monitoring recommended.")
 
-    action, severity = _decide_from_risk(collision_risk, tca_s)
+    action, severity = _decide_from_risk(final_risk, tca_s)
 
     # time window: keep readable + stable
     time_window_s = float(max(10.0, min(300.0, 0.55 * tca_s + 20.0)))
@@ -117,10 +134,11 @@ def evaluate_risk_pair(
         debris_id=debris_id,
         satellite_name=satellite_name,
         debris_name=debris_name,
-        collision_risk=collision_risk,
-        rule_based_risk=collision_risk,
-        ml_probability=(ml_pred.probability if ml_pred else None),
-        ml_classification=(ml_pred.classification if ml_pred else None),
+        collision_risk=final_risk,
+        final_risk=final_risk,
+        rule_based_risk=rule_based_risk,
+        ml_probability=ml_prob,
+        ml_classification=ml_class,
         time_to_closest_s=float(tca_s),
         confidence=confidence,
         min_distance_m=float(min_distance_m),
@@ -147,6 +165,7 @@ def evaluate_best_pair(state: PublishedState) -> PredictionResponse:
             satellite_name=sats[0].name if sats else None,
             debris_name=debris[0].name if debris else None,
             collision_risk=0.0,
+            final_risk=0.0,
             rule_based_risk=0.0,
             ml_probability=None,
             ml_classification=None,
@@ -167,11 +186,18 @@ def evaluate_best_pair(state: PublishedState) -> PredictionResponse:
     best: PredictionResponse | None = None
     best_dist = float("inf")
 
-    # Evaluate all sat x all debris (still fast enough for typical TLE counts)
+    # Evaluate all sat x all debris (optimized with prefilter)
     for s in sats:
+        sat_pos = vector(s.position_m)
         sat_in = SatelliteInput(position=s.position_m, velocity=s.velocity_mps)
 
         for d in debris:
+            deb_pos = vector(d.position_m)
+            
+            # Prefilter to avoid expensive physics + ML if > 1500 km away
+            if np.linalg.norm(sat_pos - deb_pos) > 1500_000.0:
+                continue
+
             deb_in = DebrisInput(position=d.position_m, velocity=d.velocity_mps)
             r = evaluate_risk_pair(
                 s.id,

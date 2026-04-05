@@ -22,16 +22,19 @@ from ai.schemas import (
     SatelliteInput,
 )
 
-from ai.risk_engine import evaluate_risk_pair, evaluate_best_pair
+from ai.risk_engine import evaluate_risk_pair, evaluate_best_pair, _decide_from_risk
 from ai.tle_propagation import load_tle_file, propagate_many
 from ai.scenario_engine import ScenarioRequest, evaluate_scenario
 from ai.ml_model import load_on_startup, get_model
 
 app = FastAPI()
 
+ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000")
+origins = [o.strip() for o in ALLOWED_ORIGINS.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -289,23 +292,37 @@ def scenario_predict(body: ScenarioRequest):
         except Exception:
             ml_pred = None
 
+    rule_based_risk = float(r.collision_risk)
+    ml_prob = ml_pred.probability if ml_pred else None
+    
+    if ml_prob is not None and 0.0 <= ml_prob <= 1.0:
+        final_risk = 0.7 * rule_based_risk + 0.3 * ml_prob
+        if rule_based_risk >= 0.4 or ml_prob >= 0.4:
+            final_risk = max(final_risk, max(rule_based_risk, ml_prob))
+    else:
+        final_risk = rule_based_risk
+        
+    final_risk = float(max(0.0, min(1.0, final_risk)))
+    action, severity = _decide_from_risk(final_risk, float(r.time_to_closest_s))
+
     # Adapt ScenarioResponse -> PredictionResponse
     report = PredictionResponse(
         satellite_id="SCENARIO-SAT",
         debris_id="SCENARIO-DEB",
         satellite_name="Hypothetical Satellite",
         debris_name="Hypothetical Debris",
-        collision_risk=float(r.collision_risk),
-        rule_based_risk=float(r.collision_risk),
-        ml_probability=(ml_pred.probability if ml_pred else None),
+        collision_risk=final_risk,
+        final_risk=final_risk,
+        rule_based_risk=rule_based_risk,
+        ml_probability=ml_prob,
         ml_classification=(ml_pred.classification if ml_pred else None),
         time_to_closest_s=float(r.time_to_closest_s),
         confidence=float(r.confidence),
         min_distance_m=float(r.min_distance_m),
         relative_speed_mps=float(r.relative_speed_mps),
         decision=Decision(
-            action=r.decision["action"],
-            severity=r.decision["severity"],
+            action=action,
+            severity=severity,
             time_window_s=float(r.decision["time_window_s"]),
         ),
         explain=Explainability(
@@ -321,8 +338,9 @@ def scenario_predict(body: ScenarioRequest):
         "report": report.model_dump(),
         "inputs": body.model_dump(),
         # ✅ Convenience top-level fields (requested); safe additive change
-        "rule_based_risk": float(r.collision_risk),
-        "ml_probability": (ml_pred.probability if ml_pred else None),
+        "rule_based_risk": rule_based_risk,
+        "final_risk": final_risk,
+        "ml_probability": ml_prob,
         "ml_classification": (ml_pred.classification if ml_pred else None),
     }
 
@@ -425,30 +443,20 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_text(json.dumps({"type": "error", "message": "publish_state requires state"}))
                     continue
 
-                LATEST_STATE = msg.state
+                # Compute best pair from that local simulated state
+                best = evaluate_best_pair(msg.state)
 
-                # Broadcast state
-                env_state: TelemetryEnvelope = TelemetryEnvelope(
-                    type="telemetry_state",
-                    channel="telemetry",
-                    state=LATEST_STATE,
-                    report=None,
-                    message=None,
-                )
-                await broadcast(env_state.model_dump(exclude_none=True))
-
-                # Compute best pair from that state
-                best = evaluate_best_pair(LATEST_STATE)
-                LATEST_REPORT = best
-
+                # DO NOT overwrite LATEST_STATE or LATEST_REPORT globally.
+                # Send the evaluated report specifically back to the simulator socket that requested it.
                 env_report: TelemetryEnvelope = TelemetryEnvelope(
                     type="telemetry_report",
                     channel="telemetry",
                     state=None,
-                    report=LATEST_REPORT,
+                    report=best,
                     message=None,
                 )
-                await broadcast(env_report.model_dump(exclude_none=True))
+                await ws.send_text(json.dumps(env_report.model_dump(exclude_none=True)))
+                continue
 
     except WebSocketDisconnect:
         pass
