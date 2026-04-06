@@ -170,6 +170,29 @@ export default function ScenarioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debounced.closest_approach_km, debounced.relative_velocity_kms, debounced.time_to_closest_min, debounced.altitude_difference_km]);
 
+  // Hardware Sync Effect (Debounced)
+  useEffect(() => {
+    if (!report) return;
+
+    // Wait for the scenario result to fully settle before spamming the hardware.
+    // This prevents sending intermediate recalculation noise (e.g. while sliders drag)
+    const timer = setTimeout(() => {
+      fetch("http://localhost:4000/hardware/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          final_risk: report.final_risk ?? report.collision_risk,
+          severity: report.decision.severity,
+          recommended_action: report.decision.action,
+        }),
+      }).catch(() => {
+        // Silently ignore if bridge is not running
+      });
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [report]);
+
   const decisionBadge = useMemo(() => {
     if (!report) return { label: "—", cls: "text-white/60", bgCls: "bg-white/10" };
     const sev = report.decision.severity;

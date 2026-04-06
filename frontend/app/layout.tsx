@@ -9,12 +9,17 @@ export const metadata: Metadata = {
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 
+import SoundtrackToggle from "../components/SoundtrackToggle";
+
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen antialiased font-sans">{children}</body>
+      <body className="min-h-screen antialiased font-sans">
+        {children}
+        <SoundtrackToggle />
+      </body>
     </html>
   );
 }
