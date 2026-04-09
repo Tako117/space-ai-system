@@ -160,6 +160,14 @@ def get_model(model_path: Optional[str] = None) -> CollisionRiskML:
         here = os.path.dirname(os.path.abspath(__file__))
         default_path = os.path.join(os.path.dirname(here), "models", "collision_risk_model.joblib")
         _singleton = CollisionRiskML(model_path=model_path or default_path)
+        try:
+            if not _singleton.is_loaded:
+                _singleton.load()
+        except Exception as e:
+            import traceback
+            print("Failed to lazy load model:", e)
+            traceback.print_exc()
+            pass
         return _singleton
 
 

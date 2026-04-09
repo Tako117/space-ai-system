@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useState } from "react";
 import Header from "../../components/Header";
 import CinematicAnimationScene from "../../components/CinematicAnimationScene";
+import { useTranslation } from "react-i18next";
 
 export default function AnimationPage() {
+  const { t } = useTranslation();
   const [restartKey, setRestartKey] = useState(0);
 
   return (
@@ -15,12 +17,11 @@ export default function AnimationPage() {
 
       <section className="mx-auto max-w-6xl px-6 pt-10 pb-6">
         <h1 className="text-3xl md:text-5xl font-semibold tracking-tight">
-          Storytelling sequence (plays once)
+          {t("animation.title")}
         </h1>
 
         <p className="mt-3 max-w-3xl text-white/80 leading-relaxed">
-          A simple 3D cinematic: debris intersects a satellite and the satellite becomes non-operational.
-          Use OrbitControls to inspect, and press restart if you want to rewatch.
+          {t("animation.desc")}
         </p>
 
         <div className="mt-6 flex flex-col sm:flex-row gap-3">
@@ -28,14 +29,14 @@ export default function AnimationPage() {
             onClick={() => setRestartKey((k) => k + 1)}
             className="inline-flex items-center justify-center rounded-xl bg-neon-500/10 border border-neon-500/30 px-5 py-3 text-sm font-semibold text-neon-400 shadow-glow hover:bg-neon-500/15 transition"
           >
-            Restart animation
+            {t("animation.restartBtn")}
           </button>
 
           <Link
             href="/ai"
             className="inline-flex items-center justify-center rounded-xl bg-white/5 border border-white/10 px-5 py-3 text-sm font-semibold text-white/80 hover:bg-white/10 transition"
           >
-            Go to AI Engine →
+            {t("animation.aiBtn")}
           </Link>
         </div>
       </section>
@@ -48,7 +49,7 @@ export default function AnimationPage() {
           </div>
 
           <div className="absolute bottom-4 left-4 rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-xs text-white/70">
-            Tip: drag to rotate • scroll to zoom • right-click to pan
+            {t("animation.tip")}
           </div>
         </div>
       </section>

@@ -85,11 +85,11 @@ def evaluate_scenario(req: ScenarioRequest) -> ScenarioResponse:
 
     notes = []
     if min_distance_m > THRESH_M:
-        notes.append("Closest approach is outside the scenario threshold; risk decays quickly.")
+        notes.append("NOTE_CLOSEST_OUTSIDE")
     if alt_diff_m > 20_000:
-        notes.append("Large altitude difference makes an encounter less plausible (risk reduced).")
+        notes.append("NOTE_ALT_DIFF")
     if tca_s > TIME_SCALE:
-        notes.append("Approach is far in time; uncertainty dominates the scenario.")
+        notes.append("NOTE_FAR_TIME")
 
     return ScenarioResponse(
         collision_risk=collision_risk,

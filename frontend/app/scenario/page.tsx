@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Header from "../../components/Header";
 import { postJSON } from "../../lib/api";
 import ScenarioVisualizer from "../../components/ScenarioVisualizer";
+import { useTranslation } from "react-i18next";
 
 type Decision = {
   action: "NO_ACTION" | "MONITOR" | "AVOIDANCE_MANEUVER";
@@ -78,7 +79,7 @@ function generateManeuver(report: PredictionResponse, inputs: ScenarioRiskReques
   if (report.decision.severity !== "HIGH" && report.decision.severity !== "CRITICAL") return null;
 
   const isHeadOn = inputs.relative_velocity_kms > 10;
-  
+
   let maneuverType = "";
   let direction = "";
   let deltaV = 0.0;
@@ -90,7 +91,7 @@ function generateManeuver(report: PredictionResponse, inputs: ScenarioRiskReques
     maneuverType = "Normal-plane Offset";
     direction = "Anti-Normal";
     angle = 90;
-    deltaV = 12.5; 
+    deltaV = 12.5;
     safe_sep = report.min_distance_m + 8500;
   } else if (inputs.altitude_difference_km < 1.0) {
     maneuverType = "Radial Raise";
@@ -105,7 +106,7 @@ function generateManeuver(report: PredictionResponse, inputs: ScenarioRiskReques
     deltaV = 15.0;
     safe_sep = report.min_distance_m + 12000;
   }
-  
+
   const residualRisk = (report.final_risk ?? report.collision_risk) * 0.005; // Drop by roughly 99.5%
 
   return {
@@ -138,7 +139,8 @@ export default function ScenarioPage() {
   }), [debClosest, debRelVel, debTca, debAltDiff]);
 
   const [report, setReport] = useState<PredictionResponse | null>(null);
-  const [status, setStatus] = useState<string>("Move sliders to calculate risk…");
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<string>(t("scenario.waiting"));
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -152,13 +154,13 @@ export default function ScenarioPage() {
       };
 
       try {
-        setStatus("Calculating…");
+        setStatus(t("scenario.calculating"));
         if (abortRef.current) abortRef.current.abort();
         abortRef.current = new AbortController();
 
         const data = await postJSON<ScenarioRiskResponse>("/scenario/predict", body, abortRef.current.signal);
         setReport(data.report);
-        setStatus("Updated");
+        setStatus(t("scenario.updated"));
       } catch (e: any) {
         if (e?.name === "AbortError") return;
         setStatus(`Error: ${e?.message ?? "failed to calculate"}`);
@@ -203,20 +205,20 @@ export default function ScenarioPage() {
     const cls = isCritical
       ? "text-red-400"
       : isHigh
-      ? "text-orange-400"
-      : isMed
-      ? "text-yellow-400"
-      : "text-emerald-400";
-      
+        ? "text-orange-400"
+        : isMed
+          ? "text-yellow-400"
+          : "text-emerald-400";
+
     const bgCls = isCritical
       ? "bg-red-500"
       : isHigh
-      ? "bg-orange-500"
-      : isMed
-      ? "bg-yellow-500"
-      : "bg-emerald-500";
-      
-    const label = `${sev} • ${pct(report.final_risk ?? report.collision_risk)}`;
+        ? "bg-orange-500"
+        : isMed
+          ? "bg-yellow-500"
+          : "bg-emerald-500";
+
+    const label = `${t(`dynamic.severities.${sev}`)} • ${pct(report.final_risk ?? report.collision_risk)}`;
     return { label, cls, bgCls };
   }, [report]);
 
@@ -227,12 +229,12 @@ export default function ScenarioPage() {
 
   const inputsRender = (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
-      <div className="text-neon-400 text-xs tracking-[0.24em] uppercase">Scenario Controls</div>
+      <div className="text-neon-400 text-xs tracking-[0.24em] uppercase">{t("scenario.controlsTitle")}</div>
 
       <div className="mt-5 space-y-6">
         <div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-white/85">Closest approach (km)</span>
+            <span className="text-white/85">{t("scenario.closestApp")}</span>
             <span className="text-white/70">{closestKm.toFixed(2)}</span>
           </div>
           <input
@@ -248,7 +250,7 @@ export default function ScenarioPage() {
 
         <div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-white/85">Relative velocity (km/s)</span>
+            <span className="text-white/85">{t("scenario.relVel")}</span>
             <span className="text-white/70">{relVelKms.toFixed(2)}</span>
           </div>
           <input
@@ -264,7 +266,7 @@ export default function ScenarioPage() {
 
         <div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-white/85">Time to closest (min)</span>
+            <span className="text-white/85">{t("scenario.tca")}</span>
             <span className="text-white/70">{tcaMin.toFixed(1)}</span>
           </div>
           <input
@@ -280,7 +282,7 @@ export default function ScenarioPage() {
 
         <div>
           <div className="flex items-center justify-between text-sm">
-            <span className="text-white/85">Altitude difference (km)</span>
+            <span className="text-white/85">{t("scenario.altDiff")}</span>
             <span className="text-white/70">{altDiffKm.toFixed(2)}</span>
           </div>
           <input
@@ -301,7 +303,7 @@ export default function ScenarioPage() {
     <div className="rounded-3xl border border-white/10 bg-black/20 p-8 shadow-lg">
       <div className="flex items-start justify-between">
         <div>
-          <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold">Current Assessment</div>
+          <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold">{t("scenario.assessment")}</div>
           <div className="mt-2 text-sm text-white/50">{status}</div>
         </div>
         <div className={`text-2xl font-semibold tracking-tight ${decisionBadge.cls}`}>{decisionBadge.label}</div>
@@ -316,37 +318,43 @@ export default function ScenarioPage() {
         </div>
         {report?.rule_based_risk !== undefined && (
           <div className="flex items-center justify-between text-white/60">
-            <span className="pl-1">↳ Rule-based Risk</span>
+            <span className="pl-1">{t("scenario.ruleBased")}</span>
             <span>{pct(report.rule_based_risk)}</span>
           </div>
         )}
-        {report?.ml_probability !== undefined && report.ml_probability !== null && (
+
+        {report?.ml_probability !== undefined && report.ml_probability !== null ? (
           <div className="flex items-center justify-between text-white/60">
-            <span className="pl-1">↳ ML Prediction</span>
+            <span className="pl-1">{t("scenario.mlPrediction")}</span>
             <span>{pct(report.ml_probability)} ({report.ml_classification})</span>
           </div>
-        )}
+        ) : report ? (
+          <div className="flex items-center justify-between text-white/40">
+            <span className="pl-1">{t("scenario.mlPrediction")}</span>
+            <span>{t("scenario.unavailable")}</span>
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-8 flex flex-col gap-4 text-sm">
         {/* Recommended Action Full Width */}
         <div className="rounded-2xl border border-white/5 bg-white/5 px-6 py-5 flex items-center justify-between">
-          <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">Recommended Response</div>
-          <div className="text-lg md:text-xl font-bold tracking-tight">{report ? report.decision.action.replaceAll("_", " ") : "—"}</div>
+          <div className="text-[10px] tracking-[0.22em] uppercase text-white/40">{t("scenario.recommendedResponse")}</div>
+          <div className="text-lg md:text-xl font-bold tracking-tight">{report ? t(`dynamic.actions.${report.decision.action}`) : "—"}</div>
         </div>
 
         {/* 3 Metrics spread underneath */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="rounded-2xl border border-white/5 bg-white/5 px-5 py-4 flex flex-col justify-between">
-            <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">Min Distance</div>
+            <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">{t("scenario.minDist")}</div>
             <div className="text-xl font-semibold text-white/90">{report ? km(report.min_distance_m) : "—"}</div>
           </div>
           <div className="rounded-2xl border border-white/5 bg-white/5 px-5 py-4 flex flex-col justify-between">
-            <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">Time To Closest</div>
+            <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">{t("scenario.tcaMetric")}</div>
             <div className="text-xl font-semibold text-white/90">{report ? mins(report.time_to_closest_s) : "—"}</div>
           </div>
           <div className="rounded-2xl border border-white/5 bg-white/5 px-5 py-4 flex flex-col justify-between">
-            <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">Confidence</div>
+            <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-2">{t("scenario.confidence")}</div>
             <div className="text-xl font-semibold text-white/90">{report ? pct(report.confidence) : "—"}</div>
           </div>
         </div>
@@ -356,25 +364,25 @@ export default function ScenarioPage() {
 
   const explainRender = report?.explain && (
     <div className="mt-6 rounded-3xl border border-white/5 bg-[#0b0e14] p-8 shadow-sm">
-      <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold">Risk Drivers</div>
+      <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold">{t("scenario.riskDrivers")}</div>
       <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
         <div className="flex flex-col gap-2 border-b border-white/5 pb-3">
-          <span className="text-[11px] uppercase tracking-wider text-white/40">Distance factor</span>
+          <span className="text-[11px] uppercase tracking-wider text-white/40">{t("scenario.distFactor")}</span>
           <span className="text-xl font-semibold text-white/90">{pct(report.explain.distance_factor)}</span>
         </div>
         <div className="flex flex-col gap-2 border-b border-white/5 pb-3">
-          <span className="text-[11px] uppercase tracking-wider text-white/40">Speed factor</span>
+          <span className="text-[11px] uppercase tracking-wider text-white/40">{t("scenario.speedFactor")}</span>
           <span className="text-xl font-semibold text-white/90">{pct(report.explain.speed_factor)}</span>
         </div>
         <div className="flex flex-col gap-2 border-b border-white/5 pb-3">
-          <span className="text-[11px] uppercase tracking-wider text-white/40">Timing factor</span>
+          <span className="text-[11px] uppercase tracking-wider text-white/40">{t("scenario.timingFactor")}</span>
           <span className="text-xl font-semibold text-white/90">{pct(report.explain.tca_factor)}</span>
         </div>
       </div>
       {report.explain.notes?.length > 0 && (
         <ul className="mt-6 list-disc pl-5 text-[13px] text-white/50 space-y-2">
           {report.explain.notes.map((n, i) => (
-            <li key={i} className="leading-relaxed">{n}</li>
+            <li key={i} className="leading-relaxed">{t(`dynamic.notes.${n}`)}</li>
           ))}
         </ul>
       )}
@@ -392,14 +400,14 @@ export default function ScenarioPage() {
           transition={{ duration: 0.5, ease: "easeOut" }}
           className="text-4xl font-semibold tracking-tight text-white mb-2"
         >
-          Mission Decision-Support
+          {t("scenario.title")}
         </motion.h1>
         <p className="text-white/60 max-w-3xl mb-8">
-          Hypothetical scenario modeling with instantaneous risk assessment, collision previews, and maneuver generation.
+          {t("scenario.desc")}
         </p>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-8">
-          
+
           {/* LEFT COLUMN: Inputs & Results */}
           <div className="space-y-6">
             {inputsRender}
@@ -412,20 +420,20 @@ export default function ScenarioPage() {
             {/* Collision Preview */}
             <div className="rounded-3xl border border-white/10 bg-black/20 p-8 h-[440px] flex flex-col shadow-lg">
               <div className="text-white/40 text-[10px] tracking-[0.24em] uppercase font-semibold mb-6 shrink-0">
-                Collision Preview
+                {t("scenario.collisionPreview")}
               </div>
               <div className="flex-1 w-full rounded-2xl overflow-hidden relative shadow-inner ring-1 ring-white/5">
                 {report ? (
                   <ScenarioVisualizer mode="collision" report={report} inputs={debounced} />
                 ) : (
-                  <div className="absolute inset-0 flex items-center justify-center text-white/20 text-sm">Waiting for scenario data...</div>
+                  <div className="absolute inset-0 flex items-center justify-center text-white/20 text-sm">{t("scenario.waitingData")}</div>
                 )}
               </div>
             </div>
 
             {/* Avoidance Maneuver (Only High/Critical) */}
             {maneuver && report && (
-              <motion.div 
+              <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: "auto" }}
                 className="mt-8 rounded-3xl border border-orange-500/20 bg-orange-950/10 p-8 overflow-hidden shadow-lg"
@@ -433,32 +441,32 @@ export default function ScenarioPage() {
                 <div className="flex items-center gap-3 mb-8">
                   <div className="h-2 w-2 rounded-full bg-orange-400 animate-pulse" />
                   <div className="text-orange-400/60 text-[10px] tracking-[0.24em] uppercase font-semibold">
-                    Avoidance Maneuver Preview
+                    {t("scenario.avoidanceManeuver")}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
                   {/* Maneuver details panel */}
                   <div className="bg-black/30 rounded-2xl p-6 border border-white/5 shadow-inner">
-                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-4">Recommended Action</div>
+                    <div className="text-[10px] tracking-[0.22em] uppercase text-white/40 mb-4">{t("scenario.recommendedAction")}</div>
                     <div className="text-xl font-semibold text-white mb-1">{maneuver.type}</div>
                     <div className="text-sm text-white/50 mb-6">{maneuver.direction} ({maneuver.angle}°)</div>
 
                     <div className="space-y-5">
                       <div>
-                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">Estimated Delta-v</div>
+                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{t("scenario.deltaV")}</div>
                         <div className="text-lg font-semibold text-white/90">{maneuver.deltaV.toFixed(2)} m/s</div>
                       </div>
                       <div>
-                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">Execution Window</div>
-                        <div className="text-lg font-semibold text-white/90">In {Math.round(maneuver.executionWindow)} s</div>
+                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{t("scenario.execWindow")}</div>
+                        <div className="text-lg font-semibold text-white/90">{t("scenario.inPre")}{Math.round(maneuver.executionWindow)}{t("scenario.inPost")}</div>
                       </div>
                       <div className="pt-4 border-t border-white/10">
-                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">Predicted Safe Separation</div>
+                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{t("scenario.safeSep")}</div>
                         <div className="text-lg font-semibold text-emerald-400">{km(maneuver.predictedSafeSeparation)}</div>
                       </div>
                       <div>
-                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">Predicted Residual Risk</div>
+                        <div className="text-[11px] uppercase tracking-wider text-white/40 mb-1">{t("scenario.residualRisk")}</div>
                         <div className="text-lg font-semibold text-emerald-400">{pct(maneuver.residualRisk)}</div>
                       </div>
                     </div>

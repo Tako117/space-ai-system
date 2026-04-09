@@ -1,6 +1,7 @@
-// frontend/app/layout.tsx
 import "./global.css";
 import type { Metadata } from "next";
+import I18nProvider from "../components/I18nProvider";
+import SoundtrackToggle from "../components/SoundtrackToggle";
 
 export const metadata: Metadata = {
   title: "AI-Powered Space Debris Risk Detection",
@@ -9,16 +10,21 @@ export const metadata: Metadata = {
   icons: [{ rel: "icon", url: "/favicon.ico" }],
 };
 
-import SoundtrackToggle from "../components/SoundtrackToggle";
+import { cookies } from "next/headers";
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const cookieStore = cookies();
+  const lng = cookieStore.get("i18nextLng")?.value || "en";
+
   return (
-    <html lang="en">
+    <html lang={lng}>
       <body className="min-h-screen antialiased font-sans">
-        {children}
-        <SoundtrackToggle />
+        <I18nProvider locale={lng}>
+          {children}
+          <SoundtrackToggle />
+        </I18nProvider>
       </body>
     </html>
   );

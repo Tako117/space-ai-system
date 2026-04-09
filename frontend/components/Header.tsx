@@ -2,17 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslation } from "react-i18next";
+import LanguageSwitcher from "./LanguageSwitcher";
 
 export default function Header({ overlay = false }: { overlay?: boolean }) {
   const pathname = usePathname();
+  const { t } = useTranslation();
 
   const links = [
-    { href: "/", label: "Landing" },
-    { href: "/problem", label: "Problem" },
-    { href: "/orbit", label: "Orbit" },
-    { href: "/ai", label: "AI Engine" },
-    { href: "/scenario", label: "Scenario" },
-    { href: "/animation", label: "Animation" },
+    { href: "/", label: t("header.landing") },
+    { href: "/problem", label: t("header.problem") },
+    { href: "/orbit", label: t("header.orbit") },
+    { href: "/ai", label: t("header.aiEngine") },
+    { href: "/scenario", label: t("header.scenario") },
+    { href: "/animation", label: t("header.animation") },
   ];
 
   return (
@@ -27,11 +30,11 @@ export default function Header({ overlay = false }: { overlay?: boolean }) {
         <div className="flex items-center gap-3">
           <div className="h-2.5 w-2.5 rounded-full bg-neon-500 shadow-glow animate-pulse" />
           <span className="tracking-wide font-medium text-white/95 text-sm uppercase">
-            {pathname === "/" ? "AI Space Safety Stack" : "Space AI System"}
+            {pathname === "/" ? t("header.titleLanding") : t("header.titleDefault")}
           </span>
         </div>
 
-        <nav className="hidden md:flex items-center gap-1 text-[13px] font-medium">
+        <nav className="hidden md:flex items-center gap-1 text-[13px] font-medium mr-4">
           {links.map((link) => {
             const isActive = pathname === link.href;
             return (
@@ -49,7 +52,9 @@ export default function Header({ overlay = false }: { overlay?: boolean }) {
             );
           })}
         </nav>
+        <LanguageSwitcher />
       </div>
     </header>
   );
 }
+
